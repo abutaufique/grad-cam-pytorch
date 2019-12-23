@@ -102,3 +102,8 @@ ENV/
 
 .vscode
 .DS_Store
+*.png
+*.jpg
+*.swp
+*.pyc
+dl_results/

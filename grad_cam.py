@@ -127,7 +127,14 @@ class GradCAM(_BaseWrapper):
         def forward_hook(key):
             def forward_hook_(module, input, output):
                 # Save featuremaps
-                self.fmap_pool[key] = output.detach()
+                #import pdb
+                #pdb.set_trace()
+                try:
+                    self.fmap_pool[key] = output.detach()
+                except:
+                    import pdb
+                    pdb.set_trace()
+
 
             return forward_hook_
 

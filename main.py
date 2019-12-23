@@ -9,7 +9,7 @@ from __future__ import print_function
 
 import copy
 import os.path as osp
-
+import pdb
 import click
 import cv2
 import matplotlib.cm as cm
@@ -19,7 +19,8 @@ import torch.hub
 import torch.nn.functional as F
 from torch.autograd import Variable
 from torchvision import models, transforms
-
+from sta import *
+from opda import *
 from grad_cam import (
     BackPropagation,
     Deconvnet,
@@ -316,60 +317,111 @@ def demo2(image_paths, output_dir, cuda):
                 raw_image=raw_images[j],
             )
 
+def unset_training(model):
+    for item in model.parameters():
+        item.requires_grad = False
+
 
 @main.command()
 @click.option("-i", "--image-paths", type=str, multiple=True, required=True)
 @click.option("-k", "--topk", type=int, default=3)
 @click.option("-o", "--output-dir", type=str, default="./results")
 @click.option("--cuda/--cpu", default=True)
-def demo3(image_paths, topk, output_dir, cuda):
+@click.option("--num-class","-n", type=int, multiple=True, required = True)
+@click.option("-m","--da-model", type=str, required = True)
+def demo3(image_paths, topk, output_dir, cuda, num_class, da_model):
     """
     Generate Grad-CAM with original models
     """
-
     device = get_device(cuda)
 
     # Synset words
-    classes = get_classtable()
+    #classes = get_classtable()
 
     # Third-party model from my other repository, e.g. Xception v1 ported from Keras
-    model = torch.hub.load(
-        "kazuto1011/pytorch-ported-models", "xception_v1", pretrained=True
-    )
-    model.to(device)
-    model.eval()
+    #model = torch.hub.load(
+    #    "kazuto1011/pytorch-ported-models", "xception_v1", pretrained=True
+    #)
 
+    #target_images = ['mediumresidential01','mediumresidential03', 'mediumresidential14',\
+    #        'mediumresidential21', 'mediumresidential36','mediumresidential37'] + \
+    #['mediumresidential38','mediumresidential39', 'mediumresidential40',\
+    #        'mediumresidential41', 'mediumresidential43','mediumresidential44']
+    num_class, = num_class
+    #target_images = ['baseballdiamond96', 'airplane18', 'runway42', 'sparseresidential77', 'mediumresidential21']
+    target_images = ['runway00', 'runway02', 'runway03', 'runway04', 'runway05', 'runway06', 'runway07', 'runway08']
+    classes = [str(i) for i in range(num_class)]
+    if da_model == 'STA':
+        feature_extractor = ResNetFc(model_name='resnet50',model_path='/home/at7133/Research/Domain_adaptation/Separate_to_Adapt/resnet50.pth')
+        cls = CLS(feature_extractor.output_num(), num_class, bottle_neck_dim=256)
+        model = nn.Sequential(feature_extractor, cls).cuda()
+        model.load_state_dict(torch.load('/home/at7133/Research/Domain_adaptation/Separate_to_Adapt/Only_source_classifier.pth'))
+    elif da_model == 'OPDA':
+        G, C = get_model('vgg', num_class=num_class, unit_size=1000)
+        load_model(G, C, '/home/at7133/Research/Domain_adaptation/OPDA_BP/checkpoint/checkpoint_99')
+        model = nn.Sequential(G, C).cuda()
+    model.to(device)
+    #unset_training(model)
+    model.eval()
     # Check available layer names
     print("Layers:")
     for m in model.named_modules():
         print("\t", m[0])
 
     # Here we choose the last convolution layer
-    target_layer = "exit_flow.conv4"
+    #target_layer = "exit_flow.conv4"
+    if da_model == 'STA':
+        target_layer = "0.model_resnet.layer4.2.conv3"
+    elif da_model == 'OPDA':
+        target_layer = "0.lower.36" #TODO find proper target layer
 
     # Preprocessing
-    def _preprocess(image_path):
+    def _preprocess(image_path, img_shape):
         raw_image = cv2.imread(image_path)
-        raw_image = cv2.resize(raw_image, model.image_shape)
+        #raw_image = cv2.resize(raw_image, model.image_shape)
+        raw_image = cv2.resize(raw_image, (img_shape, img_shape))
         image = torch.FloatTensor(raw_image[..., ::-1].copy())
-        image -= model.mean
-        image /= model.std
+        image = image/255.0
+        #image -= model.mean
+        #image /= model.std
         image = image.permute(2, 0, 1)
         return image, raw_image
 
     # Images
-    images = []
-    raw_images = []
-    print("Images:")
-    for i, image_path in enumerate(image_paths):
-        print("\t#{}: {}".format(i, image_path))
-        image, raw_image = _preprocess(image_path)
-        images.append(image)
-        raw_images.append(raw_image)
-    images = torch.stack(images).to(device)
+    def Load_txt(img_paths):
+        with open(img_paths,'rb') as fr:
+            image_paths = [img_path.split()[0].decode("utf-8") for img_path in fr.readlines()]
+        return image_paths
 
+    def Filter_imgages(image_paths,req_images):
+        img_files = list(map(lambda x:x.split('/')[-1].split('.')[0],image_paths))
+        satisfied_images = []
+        for item in req_images:
+            try:
+                [[idx]] = np.argwhere(np.isin(img_files,item))
+            except:
+                raise ValueError(f'{item} not found in the given paths')
+            satisfied_images.append(image_paths[idx])
+        return satisfied_images
+
+    def Load_images(image_paths, req_images):
+        if image_paths[0].endswith('.txt'):
+            assert len(image_paths)==1 #make sure only one text file is given as input
+            image_paths = Load_txt(image_paths[0])
+            image_paths = Filter_imgages(image_paths, req_images)
+            assert len(image_paths) == len(req_images)," All target images are not found"
+        images = []
+        raw_images = []
+        print("Images:")
+        for i, image_path in enumerate(image_paths):
+            print("\t#{}: {}".format(i, image_path))
+            image, raw_image = _preprocess(image_path, 224)
+            images.append(image)
+            raw_images.append(raw_image)
+        images = torch.stack(images).to(device)
+        return images,raw_images
+    images, raw_images = Load_images(image_paths, target_images)
     print("Grad-CAM:")
-
     gcam = GradCAM(model=model)
     probs, ids = gcam.forward(images)
 
