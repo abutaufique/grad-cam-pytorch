@@ -13,6 +13,8 @@ import pdb
 import click
 import cv2
 import matplotlib.cm as cm
+from os import makedirs
+from os.path import isdir, isfile
 import numpy as np
 import torch
 import torch.hub
@@ -376,12 +378,22 @@ def demo3(image_paths, topk, output_dir, cuda, num_class, da_model):
         target_layer = "0.lower.36" #TODO find proper target layer
 
     # Preprocessing
+    def _Normalize(img, mean, std):
+        if isinstance(img, torch.FloatTensor):
+            mean = torch.FloatTensor(mean)
+            std = torch.FloatTensor(std)
+        else:
+            raise TypeError(f'Expected Torch floattensor, got {type(img)}')
+        return (img - mean)/std
     def _preprocess(image_path, img_shape):
         raw_image = cv2.imread(image_path)
         #raw_image = cv2.resize(raw_image, model.image_shape)
         raw_image = cv2.resize(raw_image, (img_shape, img_shape))
         image = torch.FloatTensor(raw_image[..., ::-1].copy())
         image = image/255.0
+        if da_model == "OPDA":
+            image = _Normalize(image, [0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        #pdb.set_trace()
         #image -= model.mean
         #image /= model.std
         image = image.permute(2, 0, 1)
@@ -389,6 +401,7 @@ def demo3(image_paths, topk, output_dir, cuda, num_class, da_model):
 
     # Images
     def Load_txt(img_paths):
+        assert isfile(img_paths),f"Image path {img_paths} doesn't exist"
         with open(img_paths,'rb') as fr:
             image_paths = [img_path.split()[0].decode("utf-8") for img_path in fr.readlines()]
         return image_paths
@@ -424,7 +437,8 @@ def demo3(image_paths, topk, output_dir, cuda, num_class, da_model):
     print("Grad-CAM:")
     gcam = GradCAM(model=model)
     probs, ids = gcam.forward(images)
-
+    if not isdir(output_dir):
+        os.makedirs(output_dir)
     for i in range(topk):
 
         # Grad-CAM
