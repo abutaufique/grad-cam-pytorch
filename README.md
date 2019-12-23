@@ -96,6 +96,10 @@ If you want to adapt your own model, please verify the model uses only `nn.ReLU`
 ```bash
 python main.py demo3 -i samples/cat_dog.png
 ```
+# MY CHANGE
+```bash
+python main.py demo3 -i TEXT_FILE -o OUTPUT_PATH -m OPDA/STA -n NUM_CLASS
+```
 
 |       Predicted class        |                           #1 bull mastiff                           |                           #2 tiger cat                           |                           #3 boxer                           |
 | :--------------------------: | :-----------------------------------------------------------------: | :--------------------------------------------------------------: | :----------------------------------------------------------: |
